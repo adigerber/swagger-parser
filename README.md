@@ -4,7 +4,7 @@
 
 This is a fork of [swagger-api/swagger-parser](https://github.com/swagger-api/swagger-parser) to work on use cases for [OpenAPI Generator](https://github.com/OpenAPITools/openapi-generator).
 
-Work is made in the `2.0-OpenAPITools` branch.
+Work is made in the `2.0-OpenAPITools` branch, which is aligned with the `master` branch of the original project.
 Maven `groupId` was changed to: `<groupId>org.openapitools.swagger.parser</groupId>`
 
 There are `SNAPSHOT` and [released](https://github.com/OpenAPITools/swagger-parser/releases) version from this branch.
@@ -17,14 +17,14 @@ If you want to change something in this project, be sure to also file a PR in [s
 
 ---
 
-# Swagger Parser
+# Swagger Parser <img src="https://raw.githubusercontent.com/swagger-api/swagger.io/wordpress/images/assets/SW-logo-clr.png" height="50" align="right">
 
 ## Overview 
-This is the swagger parser project, which reads OpenAPI Specifications into current Java POJOs.  It also provides a simple framework to add additional converters from different formats into the Swagger objects, making the entire toolchain available.
+This is the Swagger Parser project, which reads OpenAPI definitions into current Java POJOs.  It also provides a simple framework to add additional converters from different formats into the Swagger objects, making the entire toolchain available.
 
 
 ### Usage
-Using the swagger-parser is simple.  Once included in your project, you can read a OpenAPI Specification from any location:
+Using the Swagger Parser is simple.  Once included in your project, you can read a OpenAPI Specification from any location:
 
 ```java
 import io.swagger.v3.parser.OpenAPIV3Parser;
@@ -74,7 +74,7 @@ Manager.  That's done by setting a system environment variable as such:
 export TRUST_ALL=true
 ```
 
-And then the swagger-parser will _ignore_ invalid certificates.  Of course this is generally a bad idea, but if you're 
+And then the Swagger Parser will _ignore_ invalid certificates.  Of course this is generally a bad idea, but if you're 
 working inside a firewall or really know what you're doing, well, there's your rope.
 
 ### Dealing with Let's Encrypt
@@ -114,7 +114,7 @@ You can include this library from Sonatype OSS for SNAPSHOTS, or Maven central f
 <dependency>
   <groupId>io.swagger.parser.v3</groupId>
   <artifactId>swagger-parser</artifactId>
-  <version>2.0.5-SNAPSHOT</version>
+  <version>2.0.8-SNAPSHOT</version>
 </dependency>
 
 ```
@@ -125,7 +125,7 @@ or
 <dependency>
   <groupId>io.swagger.parser.v3</groupId>
   <artifactId>swagger-parser</artifactId>
-  <version>2.0.5-SNAPSHOT</version>
+  <version>2.0.8-SNAPSHOT</version>
 </dependency>
 
 ```
@@ -134,7 +134,7 @@ or
 License
 -------
 
-Copyright 2017 SmartBear Software
+Copyright 2018 SmartBear Software
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -147,4 +147,3 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ---
-<img src="http://swagger.io/wp-content/uploads/2016/02/logo.jpg"/>

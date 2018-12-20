@@ -1,11 +1,5 @@
 package io.swagger.parser.test;
 
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.assertNotNull;
-import static org.testng.Assert.assertNull;
-import static org.testng.Assert.assertTrue;
-
 import io.swagger.v3.core.util.Json;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
@@ -25,7 +19,6 @@ import io.swagger.v3.parser.converter.SwaggerConverter;
 import io.swagger.v3.parser.core.models.AuthorizationValue;
 import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
-
 import org.testng.annotations.Test;
 
 import java.io.IOException;
@@ -37,6 +30,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertNotNull;
+import static org.testng.Assert.assertNull;
+import static org.testng.Assert.assertTrue;
 
 public class V2ConverterTest {
     private static final String PET_STORE_JSON = "petstore.json";
@@ -81,8 +80,8 @@ public class V2ConverterTest {
     private static final String ISSUE_676_JSON = "issue-676.json";
     private static final String ISSUE_708_YAML = "issue-708.yaml";
     private static final String ISSUE_745_YAML = "issue-745.yaml";
-    private static final String ISSUE_740_YAML = "issue-740.yaml";
     private static final String ISSUE_755_YAML = "issue-755.yaml";
+    private static final String ISSUE_740_YAML = "issue-740.yaml";
     private static final String ISSUE_756_JSON = "issue-756.json";
     private static final String ISSUE_758_JSON = "issue-758.json";
     private static final String ISSUE_762_JSON = "issue-762.json";
@@ -326,11 +325,12 @@ public class V2ConverterTest {
     public void testIssue17() throws Exception {
         OpenAPI oas = getConvertedOpenAPIFromJsonFile(ISSUE_17_JSON);
         Map<String, RequestBody> requestBodies = oas.getComponents().getRequestBodies();
-        assertNotNull(requestBodies.get("formEmail").getContent().get("multipart/form-data"));
-        assertNotNull(requestBodies.get("formPassword").getContent().get("multipart/form-data"));
+        Map<String, Schema> schemas = oas.getComponents().getSchemas();
+        assertNotNull(schemas.get("formData_formEmail"));
+        assertNotNull(schemas.get("formData_formPassword"));
         assertNotNull(requestBodies.get("bodyParam").getContent().get("*/*"));
-        assertEquals(oas.getPaths().get("/formPost").getPost().getParameters().get(0).get$ref(),
-                REQUEST_BODY_FORMEMAIL);
+        assertNull(oas.getPaths().get("/formPost").getPost().getParameters());
+        assertNotNull(oas.getPaths().get("/formPost").getPost().getRequestBody());
         assertNotNull(oas.getPaths().get("/report/{userId}").getGet().getRequestBody().
                 getContent().get("multipart/form-data").getSchema().getProperties().get("limitForm"));
     }
@@ -714,16 +714,25 @@ public class V2ConverterTest {
         assertNotNull(result.getMessages());
     }
 
+    
     @Test(description = "OpenAPI v2 converter - Migrate minLength, maxLength and pattern of String property")
     public void testIssue786() throws Exception {
         final OpenAPI oas = getConvertedOpenAPIFromJsonFile(ISSUE_768_JSON);
         assertNotNull(oas);
     }
 
+
     @Test(description = "OpenAPI v2 converter - Conversion of a spec without a info section")
     public void testIssue755() throws Exception {
         final OpenAPI oas = getConvertedOpenAPIFromJsonFile(ISSUE_755_YAML);
         assertNotNull(oas);
+    }
+
+    @Test(description = "OpenAPI v2 converter - top-level extensions should be preserved")
+    public void testTopLevelExtensions() throws Exception {
+        final OpenAPI oas = getConvertedOpenAPIFromJsonFile(PARAMETER_CONVERSION_JSON);
+        assertNotNull(oas);
+        assertEquals((String)oas.getExtensions().get("x-some-extensions"), "hello");
     }
     
     @Test(description = "OpenAPI v2 converter - Conversion param extensions should be preserved")

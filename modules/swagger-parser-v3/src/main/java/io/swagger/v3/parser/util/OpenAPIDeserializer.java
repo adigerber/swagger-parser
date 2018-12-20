@@ -52,15 +52,8 @@ import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -98,6 +91,7 @@ public class OpenAPIDeserializer {
     private static final String PATH_PARAMETER = "path";
     private static final String HEADER_PARAMETER = "header";
 
+    private final Set<String> operationIDs = new HashSet<>();
 
     public SwaggerParseResult deserialize(JsonNode rootNode) {
     	return deserialize(rootNode, null);
@@ -300,11 +294,18 @@ public class OpenAPIDeserializer {
             return null;
         }
         List<Tag> tags = new ArrayList<>();
+        Set<String> tagsTracker = new HashSet<>();
         for (JsonNode item : obj) {
             if (item.getNodeType().equals(JsonNodeType.OBJECT)) {
                 Tag tag = getTag((ObjectNode) item, location, result);
                 if (tag != null) {
                     tags.add(tag);
+
+                    if(tagsTracker.contains((String)tag.getName())) {
+                        result.uniqueTags(location,tag.getName());
+                    }
+
+                    tagsTracker.add(tag.getName());
                 }
             }
         }
@@ -524,13 +525,67 @@ public class OpenAPIDeserializer {
                 if (!pathValue.getNodeType().equals(JsonNodeType.OBJECT)) {
                     result.invalidType(location, pathName, "object", pathValue);
                 } else {
+                    if(!pathName.startsWith("/")){
+                        result.warning(location," Resource "+pathName+ " should start with /");
+                    }
                     ObjectNode path = (ObjectNode) pathValue;
                     PathItem pathObj = getPathItem(path,String.format("%s.'%s'", location,pathName), result);
+                    String[] eachPart = pathName.split("/");
+                    Arrays.stream(eachPart)
+                            .filter(part -> part.startsWith("{") && part.endsWith("}") && part.length() > 2)
+                            .forEach(part -> {
+                                String pathParam = part.substring(1, part.length() - 1);
+                                boolean definedInPathLevel = isPathParamDefined(pathParam, pathObj.getParameters());
+                                if (!definedInPathLevel) {
+                                    List<Operation> operationsInAPath = getAllOperationsInAPath(pathObj);
+                                    operationsInAPath.forEach(operation -> {
+                                        if (!isPathParamDefined(pathParam, operation.getParameters())) {
+                                            result.warning(location + ".'" + pathName + "'"," Declared path parameter " + pathParam + " needs to be defined as a path parameter in path or operation level");
+                                            return;
+                                        }
+                                    });
+                                }
+                            });
                     paths.put(pathName, pathObj);
                 }
             }
         }
         return paths;
+    }
+
+    private boolean isPathParamDefined(String pathParam, List<Parameter> parameters) {
+        if (parameters == null || parameters.isEmpty()) {
+            return false;
+        } else {
+            Parameter pathParamDefined = parameters.stream()
+                            .filter(parameter -> pathParam.equals(parameter.getName()) && "path".equals(parameter.getIn()))
+                            .findFirst()
+                            .orElse(null);
+            if (pathParamDefined == null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void addToOperationsList(List<Operation> operationsList, Operation operation) {
+        if (operation == null) {
+            return;
+        }
+        operationsList.add(operation);
+    }
+
+    public List<Operation> getAllOperationsInAPath(PathItem pathObj) {
+        List<Operation> operations = new ArrayList<>();
+        addToOperationsList(operations, pathObj.getGet());
+        addToOperationsList(operations, pathObj.getPut());
+        addToOperationsList(operations, pathObj.getPost());
+        addToOperationsList(operations, pathObj.getPatch());
+        addToOperationsList(operations, pathObj.getDelete());
+        addToOperationsList(operations, pathObj.getTrace());
+        addToOperationsList(operations, pathObj.getOptions());
+        addToOperationsList(operations, pathObj.getHead());
+        return operations;
     }
 
     public PathItem getPathItem(ObjectNode obj, String location, ParseResult result) {
@@ -687,7 +742,7 @@ public class OpenAPIDeserializer {
     }
 
 
-    public String getString(String key, ObjectNode node, boolean required, String location, ParseResult result) {
+    public String getString(String key, ObjectNode node, boolean required, String location, ParseResult result, Set<String> uniqueValues) {
         String value = null;
         JsonNode v = node.get(key);
         if (node == null || v == null) {
@@ -699,8 +754,16 @@ public class OpenAPIDeserializer {
             result.invalidType(location, key, "string", node);
         } else {
             value = v.asText();
+            if (uniqueValues != null && !uniqueValues.add(value)) {
+                result.unique(location, "operationId");
+                result.invalid();
+            }
         }
         return value;
+    }
+
+    public String getString(String key, ObjectNode node, boolean required, String location, ParseResult result) {
+        return getString(key, node, required, location, result, null);
     }
 
     public Set<String> getKeys(ObjectNode node) {
@@ -802,6 +865,12 @@ public class OpenAPIDeserializer {
 
         value = getString("url", node, false, location, result);
         if(StringUtils.isNotBlank(value)) {
+            try {
+               new URL(value);
+            }
+            catch (Exception e) {
+                result.warning(location,value);
+            }
             license.setUrl(value);
         }
 
@@ -833,6 +902,12 @@ public class OpenAPIDeserializer {
 
         value = getString("url", node, false, location, result);
         if(StringUtils.isNotBlank(value)) {
+            try {
+                new URL(value);
+            }
+            catch (Exception e) {
+                result.warning(location,value);
+            }
             contact.setUrl(value);
         }
 
@@ -996,6 +1071,11 @@ public class OpenAPIDeserializer {
 
         Set<String> linkKeys = getKeys(obj);
         for(String linkName : linkKeys) {
+            if (!Pattern.matches("^[a-zA-Z0-9\\.\\-_]+$",
+                            linkName)) {
+                result.warning(location, "Link name "+ linkName + " doesn't adhere to regular expression ^[a-zA-Z0-9\\.\\-_]+$");
+            }
+
             JsonNode linkValue = obj.get(linkName);
             if (!linkValue.getNodeType().equals(JsonNodeType.OBJECT)) {
                 result.invalidType(location, linkName, "object", linkValue);
@@ -1050,6 +1130,11 @@ public class OpenAPIDeserializer {
             link.setParameters(getLinkParameters(parametersObject, location, result));
         }
 
+        String requestBody = getString("requestBody",linkNode,false,location,result);
+        if (requestBody!= null) {
+            link.setRequestBody(requestBody);
+        }
+
         ObjectNode headerObject = getObject("headers",linkNode,false,location,result);
         if (headerObject!= null) {
             link.setHeaders(getHeaders(headerObject, location, result));
@@ -1100,6 +1185,10 @@ public class OpenAPIDeserializer {
         Map<String, Callback> callbacks = new LinkedHashMap<>();
         Set<String> keys = getKeys(node);
         for(String key : keys) {
+            if (!Pattern.matches("^[a-zA-Z0-9\\.\\-_]+$",
+                            key)) {
+                result.warning(location, "Callback key "+ key + " doesn't adhere to regular expression ^[a-zA-Z0-9\\.\\-_]+$");
+            }
             Callback callback = getCallback((ObjectNode) node.get(key), location, result);
             if (callback != null) {
                 callbacks.put(key, callback);
@@ -1122,14 +1211,13 @@ public class OpenAPIDeserializer {
                 JsonNode ref = node.get("$ref");
                 if (ref != null) {
                     if (ref.getNodeType().equals(JsonNodeType.STRING)) {
-                        PathItem pathItem = new PathItem();
                         String mungedRef = mungedRef(ref.textValue());
                         if (mungedRef != null) {
-                            pathItem.set$ref(mungedRef);
+                            callback.set$ref(mungedRef);
                         }else{
-                            pathItem.set$ref(ref.textValue());
+                            callback.set$ref(ref.textValue());
                         }
-                        return callback.addPathItem(name,pathItem);
+                        return callback;
                     } else {
                         result.invalidType(location, "$ref", "string", node);
                         return null;
@@ -1280,6 +1368,11 @@ public class OpenAPIDeserializer {
 
         Set<String> parameterKeys = getKeys(obj);
         for(String parameterName : parameterKeys) {
+            if (!Pattern.matches("^[a-zA-Z0-9\\.\\-_]+$",
+                            parameterName)) {
+                result.warning(location, "Parameter name "+ parameterName + " doesn't adhere to regular expression ^[a-zA-Z0-9\\.\\-_]+$");
+            }
+
             JsonNode parameterValue = obj.get(parameterName);
             if (parameterValue.getNodeType().equals(JsonNodeType.OBJECT)) {
                 ObjectNode parameterObj = (ObjectNode) parameterValue;
@@ -1458,6 +1551,10 @@ public class OpenAPIDeserializer {
 
         Set<String> headerKeys = getKeys(obj);
         for(String headerName : headerKeys) {
+            if (!Pattern.matches("^[a-zA-Z0-9\\.\\-_]+$",
+                            headerName)) {
+                result.warning(location, "Header name "+ headerName + " doesn't adhere to regular expression ^[a-zA-Z0-9\\.\\-_]+$");
+            }
             JsonNode headerValue = obj.get(headerName);
             if (!headerValue.getNodeType().equals(JsonNodeType.OBJECT)) {
                 result.invalidType(location, headerName, "object", headerValue);
@@ -1600,6 +1697,10 @@ public class OpenAPIDeserializer {
 
         Set<String> securitySchemeKeys = getKeys(obj);
         for(String securitySchemeName : securitySchemeKeys) {
+            if (!Pattern.matches("^[a-zA-Z0-9\\.\\-_]+$",
+                            securitySchemeName)) {
+                result.warning(location, "SecurityScheme name "+ securitySchemeName + " doesn't adhere to regular expression ^[a-zA-Z0-9\\.\\-_]+$");
+            }
             JsonNode securitySchemeValue = obj.get(securitySchemeName);
             if (!securitySchemeValue.getNodeType().equals(JsonNodeType.OBJECT)) {
                 result.invalidType(location, securitySchemeName, "object", securitySchemeValue);
@@ -1828,6 +1929,10 @@ public class OpenAPIDeserializer {
 
         Set<String> schemaKeys = getKeys(obj);
         for (String schemaName : schemaKeys) {
+            if (!Pattern.matches("^[a-zA-Z0-9\\.\\-_]+$",
+                            schemaName)) {
+                result.warning(location, "Schema name "+ schemaName + " doesn't adhere to regular expression ^[a-zA-Z0-9\\.\\-_]+$");
+            }
             JsonNode schemaValue = obj.get(schemaName);
                 if (!schemaValue.getNodeType().equals(JsonNodeType.OBJECT)) {
                     result.invalidType(location, schemaName, "object", schemaValue);
@@ -2199,6 +2304,11 @@ public class OpenAPIDeserializer {
 
         Set<String> exampleKeys = getKeys(obj);
         for(String exampleName : exampleKeys) {
+            if (!Pattern.matches("^[a-zA-Z0-9\\.\\-_]+$",
+                            exampleName)) {
+                result.warning(location, "Example name "+ exampleName + " doesn't adhere to regular expression ^[a-zA-Z0-9\\.\\-_]+$");
+            }
+
             JsonNode exampleValue = obj.get(exampleName);
             if (!exampleValue.getNodeType().equals(JsonNodeType.OBJECT)) {
                 result.invalidType(location, exampleName, "object", exampleValue);
@@ -2328,6 +2438,11 @@ public class OpenAPIDeserializer {
         Set<String> keys = getKeys(node);
 
         for (String key : keys) {
+            if (!Pattern.matches("^[a-zA-Z0-9\\.\\-_]+$",
+                            key)) {
+                result.warning(location, "Response key "+ key + " doesn't adhere to regular expression ^[a-zA-Z0-9\\.\\-_]+$");
+            }
+
             if (key.startsWith("x-")) {
                 Map <String,Object> extensions = getExtensions(node);
                 if(extensions != null && extensions.size() > 0) {
@@ -2455,7 +2570,7 @@ public class OpenAPIDeserializer {
         if(docs != null) {
             operation.setExternalDocs(docs);
         }
-        value = getString("operationId", obj, false, location, result);
+        value = getString("operationId", obj, false, location, result, operationIDs);
         if (StringUtils.isNotBlank(value)) {
             operation.operationId(value);
         }
@@ -2561,6 +2676,10 @@ public class OpenAPIDeserializer {
 
         Set<String> bodyKeys = getKeys(obj);
         for(String bodyName : bodyKeys) {
+            if (!Pattern.matches("^[a-zA-Z0-9\\.\\-_]+$",
+                            bodyName)) {
+                result.warning(location, "RequestBody name "+ bodyName + " doesn't adhere to regular expression ^[a-zA-Z0-9\\.\\-_]+$");
+            }
             JsonNode bodyValue = obj.get(bodyName);
             if (!bodyValue.getNodeType().equals(JsonNodeType.OBJECT)) {
                 result.invalidType(location, bodyName, "object", bodyValue);
@@ -2670,6 +2789,9 @@ public class OpenAPIDeserializer {
         private Map<Location, JsonNode> unsupported = new LinkedHashMap<>();
         private Map<Location, String> invalidType = new LinkedHashMap<>();
         private List<Location> missing = new ArrayList<>();
+        private List<Location> warnings = new ArrayList<>();
+        private List<Location> unique = new ArrayList<>();
+        private List<Location> uniqueTags = new ArrayList<>();
 
         public ParseResult() {
         }
@@ -2685,6 +2807,17 @@ public class OpenAPIDeserializer {
         public void missing(String location, String key) {
             missing.add(new Location(location, key));
         }
+      
+        public void warning(String location, String key) {
+            warnings.add(new Location(location, key));
+        }
+      
+        public void unique(String location, String key) {
+            unique.add(new Location(location, key));
+
+        }
+
+        public void uniqueTags(String location, String key) {uniqueTags.add(new Location(location,key));}
 
         public void invalidType(String location, String key, String expectedType, JsonNode value) {
             invalidType.put(new Location(location, key), expectedType);
@@ -2715,9 +2848,24 @@ public class OpenAPIDeserializer {
                 String message = "attribute " + location + l.key + " is missing";
                 messages.add(message);
             }
+            for (Location l : warnings) {
+                String location = l.location.equals("") ? "" : l.location + ".";
+                String message = "attribute " + location +l.key;
+                messages.add(message);
+            }
             for (Location l : unsupported.keySet()) {
                 String location = l.location.equals("") ? "" : l.location + ".";
                 String message = "attribute " + location + l.key + " is unsupported";
+                messages.add(message);
+            }
+            for (Location l : unique) {
+                String location = l.location.equals("") ? "" : l.location + ".";
+                String message = "attribute " + location + l.key + " is repeated";
+                messages.add(message);
+            }
+            for (Location l : uniqueTags) {
+                String location = l.location.equals("") ? "" : l.location + ".";
+                String message = "attribute " + location + l.key + " is repeated";
                 messages.add(message);
             }
             return messages;

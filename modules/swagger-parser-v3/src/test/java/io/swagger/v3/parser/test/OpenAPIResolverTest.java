@@ -1,11 +1,14 @@
 package io.swagger.v3.parser.test;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import io.swagger.v3.core.util.Json;
+import io.swagger.v3.core.util.Yaml;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
@@ -67,6 +70,7 @@ import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
+import static org.testng.FileAssert.fail;
 
 
 public class OpenAPIResolverTest {
@@ -339,11 +343,11 @@ public class OpenAPIResolverTest {
 
         Map<String, Callback> callbacks = openAPI.getComponents().getCallbacks();
         // internal callback reference
-        assertEquals(callbacks.get("referenced").get("$ref").get$ref(),"#/components/callbacks/failed");
+        assertEquals(callbacks.get("referenced").get$ref(),"#/components/callbacks/failed");
         //callback pathItem -> operation ->requestBody
         assertEquals(callbacks.get("heartbeat").get("$request.query.heartbeat-url").getPost().getRequestBody().get$ref(),"#/components/requestBodies/requestBody3");
         //remote callback ref
-        assertEquals(callbacks.get("remoteCallback").get("$ref").get$ref(),"#/components/callbacks/callback");
+        assertEquals(callbacks.get("remoteCallback").get$ref(),"http://localhost:" + serverPort + "/remote/callback");
 
     }
 
@@ -430,7 +434,7 @@ public class OpenAPIResolverTest {
         OpenAPI openAPI = new OpenAPIV3Parser().readContents(yaml,auths,options).getOpenAPI();
         ResolverFully resolverUtil = new ResolverFully();
         resolverUtil.resolveFully(openAPI);
-        //System.out.println(openAPI.getPaths().get("/selfRefB").getGet().getRequestBody().getContent().get("application/json"));
+
 
         RequestBody body = openAPI.getPaths().get("/selfRefB").getGet().getRequestBody();
         Schema schema = body.getContent().get("application/json").getSchema();
@@ -593,6 +597,7 @@ public class OpenAPIResolverTest {
         assertTrue(allOf.getAllOf().get(0).getProperties().containsKey("street"));
         assertTrue(allOf.getAllOf().get(1).getProperties().containsKey("gps"));
 
+
         // Testing path item
         ComposedSchema schema = (ComposedSchema) openAPI.getPaths().get("/withInvalidComposedModel").getPost().getRequestBody().getContent().get("application/json").getSchema();
 
@@ -740,6 +745,20 @@ public class OpenAPIResolverTest {
         Assert.assertTrue(examples.size() == 2);
     }
 
+    @Test
+    public void allOfExampleGeneration(@Injectable final List<AuthorizationValue> auths) throws JsonProcessingException {
+        ParseOptions options = new ParseOptions();
+        options.setResolve(true);
+        options.setResolveFully(true);
+        OpenAPI openAPI = new OpenAPIV3Parser().read("src/test/resources/simpleAllOf.yaml", null, options);
+
+        Assert.assertNotNull(openAPI);
+        Object withoutExample = openAPI.getPaths().get("/foo").getGet().getResponses().get("200").getContent().get("application/json").getSchema().getExample();
+        Assert.assertNull(withoutExample);
+
+        Object withExample = openAPI.getPaths().get("/bar").getGet().getResponses().get("200").getContent().get("application/json").getSchema().getExample();
+        Assert.assertEquals("{\"someProperty\":\"ABC\",\"someOtherProperty\":42}", Json.mapper().writeValueAsString(withExample));
+    }
 
     @Test
     public void testSwaggerResolver(@Injectable final OpenAPI swagger,
@@ -1102,6 +1121,60 @@ public class OpenAPIResolverTest {
         assertEquals(qp.getName(), "page");
     }
 
+    @Test(description = "update internal references of external files")
+    public void testUpdateInternalReferencesOfExternalFiles() {
+        ParseOptions options = new ParseOptions();
+        options.setResolve(true);
+
+        OpenAPI openAPI = new OpenAPIV3Parser().read("internal-references-in-external-files/main.yaml", null, options);
+
+        ComposedSchema commonSchema = (ComposedSchema) openAPI.getComponents().getSchemas().get("common");
+
+        assertEquals(commonSchema.getAllOf().get(0).get$ref(), "#/components/schemas/core");
+        assertEquals(((Schema) commonSchema.getAllOf().get(1).getProperties().get("direct")).get$ref(), "#/components/schemas/core");
+        assertEquals(((ArraySchema) commonSchema.getAllOf().get(1).getProperties().get("referenced")).getItems().get$ref(), "#/components/schemas/core");
+        Schema coreSchema = openAPI.getComponents().getSchemas().get("core");
+        assertEquals(((Schema) coreSchema.getProperties().get("inner")).get$ref(), "#/components/schemas/innerCore");
+    }
+
+    @Test
+    public void recursiveResolving() {
+        ParseOptions parseOptions = new ParseOptions();
+        parseOptions.setResolveFully(true);
+        OpenAPI openAPI = new OpenAPIV3Parser().read("recursive.yaml", null, parseOptions);
+        Assert.assertNotNull(openAPI.getPaths().get("/myPath").getGet().getResponses().get("200").getContent().get("application/json").getSchema().getProperties().get("myProp"));
+        try {
+            Json.mapper().writeValueAsString(openAPI);
+        }
+        catch (Exception e) {
+            fail("Recursive loop found");
+        }
+
+    }
+
+    @Test
+    public void recursiveResolving2() {
+        ParseOptions parseOptions = new ParseOptions();
+        parseOptions.setResolve(true);
+        parseOptions.setResolveFully(true);
+        OpenAPI openAPI = new OpenAPIV3Parser().read("recursive2.yaml", null, parseOptions);
+        try {
+            Json.mapper().writeValueAsString(openAPI);
+        }
+        catch (Exception e) {
+            fail("Recursive loop found");
+        }
+    }
+
+    @Test
+    public void propertyNameMixup() {
+        ParseOptions parseOptions = new ParseOptions();
+        parseOptions.setResolveFully(true);
+        OpenAPI openAPI = new OpenAPIV3Parser().read("simple.yaml", null, parseOptions);
+        assertEquals(((StringSchema)openAPI.getComponents().getSchemas().get("Manufacturer").getProperties().get("name")).getExample(), "ACME Corporation");
+        Schema schema = openAPI.getPaths().get("/inventory").getGet().getResponses().get("200").getContent().get("application/json").getSchema();
+        assertEquals(((ObjectSchema) ((ArraySchema) schema).getItems().getProperties().get("manufacturer")).getProperties().get("name").getExample(), "ACME Corporation");
+    }
 
     public String replacePort(String url){
         String pathFile = url.replace("${dynamicPort}", String.valueOf(this.serverPort));
