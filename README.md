@@ -15,7 +15,7 @@ Last released version:
 <dependency>
   <groupId>org.openapitools.swagger.parser</groupId>
   <artifactId>swagger-parser</artifactId>
-  <version>2.0.8-OpenAPITools.org-2</version>
+  <version>2.0.10-OpenAPITools.org-1</version>
 </dependency>
 ```
 
