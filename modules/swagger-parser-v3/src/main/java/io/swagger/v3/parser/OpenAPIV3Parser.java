@@ -200,7 +200,7 @@ public class OpenAPIV3Parser implements SwaggerParserExtension {
     protected List<SwaggerParserExtension> getExtensions() {
         List<SwaggerParserExtension> extensions = new ArrayList<>();
 
-        ServiceLoader<SwaggerParserExtension> loader = ServiceLoader.load(SwaggerParserExtension.class);
+        ServiceLoader<SwaggerParserExtension> loader = ServiceLoader.load(SwaggerParserExtension.class, SwaggerParserExtension.class.getClassLoader());
         Iterator<SwaggerParserExtension> itr = loader.iterator();
         while (itr.hasNext()) {
             extensions.add(itr.next());
